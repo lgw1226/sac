@@ -14,13 +14,14 @@ rets = []
 for i in range(num_episode):
     ret = 0
     ob, info = env.reset()
-    for _ in count():
+    for step in count():
         ac = env.action_space.sample()
         ob, rwd, terminated, truncated, info = env.step(ac)
         ret += rwd
 
         if terminated or truncated:
             rets.append(ret)
+            print(step)
             break
 
 rets = np.array(rets)

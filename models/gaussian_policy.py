@@ -1,15 +1,19 @@
+from math import log
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.distributions as distributions
+import torch.nn.functional as F
 
 
 class GaussianPolicy():
 
-    def __init__(self, ob_dim, ac_dim, lr=0.001, device=None):
+    def __init__(self, ob_dim, ac_dim, ac_lim, lr=0.001, device=None):
         
         self.ob_dim = ob_dim
         self.ac_dim = ac_dim
+        self.ac_lim = ac_lim
 
         self.lr = lr
         self.device = device
@@ -22,25 +26,31 @@ class GaussianPolicy():
         output = self.net(ob)  # (batch_size, 2)
 
         mean = output[:,:self.ac_dim]
-        log_std = torch.clip(output[:,self.ac_dim:], -3, 3)
+        log_std = torch.clip(output[:,self.ac_dim:], -10, 2)
 
         dist = distributions.Normal(mean, torch.exp(log_std))
 
         return dist
     
-    def get_action(self, ob):
+    def get_action(self, ob, eval=False):
 
-        dist = self.get_dist(ob)
-        action = dist.sample()
+        if not eval:
+            dist = self.get_dist(ob)
+            action = dist.rsample()
+        else:
+            dist = self.get_dist(ob)
+            action = dist.loc
 
-        return action
+        return torch.tanh(action) * self.ac_lim
     
-    def get_logp(self, ob, ac):
+    def get_logp(self, ob):
         
         dist = self.get_dist(ob)
+        ac = dist.rsample()
         logp = dist.log_prob(ac)
-
-        return logp
+        logp -= 2 * (log(2) - ac - F.softplus(-2 * ac))
+        
+        return logp.sum(-1, keepdim=True)
 
 
 class GaussianPolicyNet(nn.Module):
@@ -70,6 +80,10 @@ if __name__ == '__main__':
 
     batch_size = 4
     ob = torch.randn((batch_size, ob_dim), device=device); print(ob)
-    dist = policy.get_dist(ob); print(dist.loc, dist.scale, sep='\n')
-    ac = policy.get_action(ob); print(ac)
-    logp = policy.get_logp(ob, ac); print(logp)
+    ac_sample = policy.get_action(ob); print(ac_sample)
+    ac_rsample = policy.get_reparam_action(ob); print(ac_rsample)
+
+    # dist = policy.get_dist(ob); print(dist.loc, dist.scale, sep='\n')
+    # ac = policy.get_action(ob); print(ac)
+    # logp = policy.get_logp(ob, ac); print(logp)
+

@@ -27,10 +27,10 @@ class ReplayBuffer():
         
         if self.idx + len_data <= self.size:
 
-            self.ob_buf[self.idx:self.idx+len_data] = ob
-            self.ac_buf[self.idx:self.idx+len_data] = ac
+            self.ob_buf[self.idx:self.idx+len_data,:] = ob
+            self.ac_buf[self.idx:self.idx+len_data,:] = ac
             self.rwd_buf[self.idx:self.idx+len_data] = rwd
-            self.next_ob_buf[self.idx:self.idx+len_data] = next_ob
+            self.next_ob_buf[self.idx:self.idx+len_data,:] = next_ob
             self.done_buf[self.idx:self.idx+len_data] = done
 
             self.idx += len_data
