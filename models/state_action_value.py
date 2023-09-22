@@ -5,14 +5,16 @@ import torch.optim as optim
 
 class StateActionValue():
 
-    def __init__(self, ob_dim, ac_dim, device):
+    def __init__(self, ob_dim, ac_dim, lr=0.001, device=None):
         
         self.ob_dim = ob_dim
         self.ac_dim = ac_dim
+
+        self.lr = lr
         self.device = device
         
         self.net = StateActionValueNet(self.ob_dim + self.ac_dim).to(self.device)
-        self.optim = optim.Adam(self.net.parameters())
+        self.optim = optim.Adam(self.net.parameters(), lr=self.lr)
         self.criterion = nn.MSELoss()
 
     def get_value(self, ob, ac):

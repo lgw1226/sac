@@ -5,13 +5,15 @@ import torch.optim as optim
 
 class StateValue():
 
-    def __init__(self, ob_dim, device):
+    def __init__(self, ob_dim, lr=0.001, device=None):
         
         self.ob_dim = ob_dim
+
+        self.lr = lr
         self.device = device
         
-        self.net = StateValueNet(self.ob_dim).to(device)
-        self.optim = optim.Adam(self.net.parameters())
+        self.net = StateValueNet(self.ob_dim).to(self.device)
+        self.optim = optim.Adam(self.net.parameters(), lr=self.lr)
         self.criterion = nn.MSELoss()
 
     def get_value(self, ob):
@@ -50,7 +52,7 @@ if __name__ == '__main__':
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
     ob_dim = 3
-    state_value = StateValue(ob_dim, device)
+    state_value = StateValue(ob_dim, device=device)
     
     # input = torch.randn(ob_dim, device=device); print(input)
     # output = state_value.get_value(input); print(output)

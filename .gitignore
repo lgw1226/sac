@@ -4,3 +4,9 @@
 
 # for development
 /*.egg-info
+
+# tensorboard run files
+/runs
+
+# trained agents
+/trained_agents

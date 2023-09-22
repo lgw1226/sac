@@ -6,21 +6,23 @@ import torch.distributions as distributions
 
 class GaussianPolicy():
 
-    def __init__(self, ob_dim, ac_dim, device):
+    def __init__(self, ob_dim, ac_dim, lr=0.001, device=None):
         
         self.ob_dim = ob_dim
         self.ac_dim = ac_dim
+
+        self.lr = lr
         self.device = device
         
-        self.net = GaussianPolicyNet(self.ob_dim).to(self.device)
-        self.optim = optim.Adam(self.net.parameters())
+        self.net = GaussianPolicyNet(self.ob_dim, self.ac_dim).to(self.device)
+        self.optim = optim.Adam(self.net.parameters(), lr=self.lr)
 
     def get_dist(self, ob):
 
         output = self.net(ob)  # (batch_size, 2)
 
-        mean = output[:,0]
-        log_std = output[:,1]
+        mean = output[:,:self.ac_dim]
+        log_std = torch.clip(output[:,self.ac_dim:], -3, 3)
 
         dist = distributions.Normal(mean, torch.exp(log_std))
 
@@ -43,14 +45,14 @@ class GaussianPolicy():
 
 class GaussianPolicyNet(nn.Module):
 
-    def __init__(self, in_dim):
+    def __init__(self, in_dim, out_dim):
 
         super().__init__()
 
         self.fc = nn.Sequential(
             nn.Linear(in_dim, 256), nn.ReLU(),
             nn.Linear(256, 256), nn.ReLU(),
-            nn.Linear(256, 2)
+            nn.Linear(256, out_dim * 2)
         )
 
     def forward(self, x):
@@ -63,8 +65,8 @@ if __name__ == '__main__':
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
     ob_dim = 3
-    ac_dim = 2
-    policy = GaussianPolicy(ob_dim, ac_dim, device)
+    ac_dim = 1
+    policy = GaussianPolicy(ob_dim, ac_dim, device=device)
 
     batch_size = 4
     ob = torch.randn((batch_size, ob_dim), device=device); print(ob)
