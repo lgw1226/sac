@@ -9,6 +9,8 @@ class SACAgent():
 
     def __init__(
         self, ob_dim, ac_dim, ac_lim,
+        num_layers=2,
+        layer_size=256,
         lr=0.0003,
         tau=0.005,
         gamma=0.99,
@@ -20,16 +22,18 @@ class SACAgent():
         self.ac_dim = ac_dim
         self.ac_lim = ac_lim
 
+        self.num_layers = num_layers
+        self.layer_size = layer_size
         self.lr = lr
         self.tau = tau
         self.gamma = gamma
         self.alpha = alpha
         self.device = device
 
-        self.p = models.GaussianPolicy(self.ob_dim, self.ac_dim, self.ac_lim, lr=self.lr, device=self.device)
+        self.p = models.SquashedGaussianPolicy(self.ob_dim, self.ac_dim, self.ac_lim, num_layers=self.num_layers, layer_size=self.layer_size, lr=self.lr, device=self.device)
 
-        self.q1 = models.StateActionValue(self.ob_dim, self.ac_dim, lr=self.lr, device=self.device)
-        self.q2 = models.StateActionValue(self.ob_dim, self.ac_dim, lr=self.lr, device=self.device)
+        self.q1 = models.StateActionValue(self.ob_dim, self.ac_dim, num_layers=self.num_layers, layer_size=self.layer_size, lr=self.lr, device=self.device)
+        self.q2 = models.StateActionValue(self.ob_dim, self.ac_dim, num_layers=self.num_layers, layer_size=self.layer_size, lr=self.lr, device=self.device)
 
         self.q1_target = copy(self.q1)
         self.q2_target = copy(self.q2)
@@ -39,8 +43,7 @@ class SACAgent():
         q1_value = self.q1.get_value(ob, ac)
         q2_value = self.q2.get_value(ob, ac)
         with torch.no_grad():
-            next_ac = self.p.get_action(next_ob)
-            next_logp = self.p.get_logp(next_ob)
+            next_ac, next_logp = self.p.get_action(next_ob)
             q_value = torch.minimum(self.q1_target.get_value(next_ob, next_ac), self.q2_target.get_value(next_ob, next_ac))
             target = rwd + self.gamma * (1 - done) * (q_value - self.alpha * next_logp)
 
@@ -72,8 +75,7 @@ class SACAgent():
     
     def update_p(self, ob):
 
-        ac = self.p.get_action(ob)
-        logp = self.p.get_logp(ob)
+        ac, logp = self.p.get_action(ob)
         q_value = torch.minimum(self.q1_target.get_value(ob, ac), self.q2_target.get_value(ob, ac))
         
         p_loss = -torch.mean(q_value - self.alpha * logp)

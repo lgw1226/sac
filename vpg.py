@@ -16,12 +16,6 @@ import buffers
 def train(args):
 
     env_name = args.env_name
-    num_envs = args.num_envs
-    step_per_update = args.step_per_update
-
-    memory_size = args.memory_size
-    batch_size = args.batch_size
-    start_step = args.start_step
 
     num_updates = args.num_updates
     save_count = args.save_count
@@ -32,76 +26,60 @@ def train(args):
     layer_size = args.layer_size
 
     lr = args.lr
-    tau = args.tau
     gamma = args.gamma
-    alpha = args.alpha
 
     # setups
 
     timestamp = time.strftime('%y%m%d_%H%M%S')
     writer = SummaryWriter(f'runs/{timestamp}/')
 
-    env = gym.make_vec(env_name, num_envs=num_envs)
+    env = gym.make(env_name)
     ob_dim = env.observation_space.shape[-1]
     ac_dim = env.action_space.shape[-1]
     ac_lim = float(np.min(env.action_space.high))
 
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     
-    agent = agents.SACAgent(
+    agent = agents.VPGAgent(
         ob_dim, ac_dim, ac_lim,
         num_layers=num_layers,
         layer_size=layer_size,
         lr=lr,
-        tau=tau,
         gamma=gamma,
-        alpha=alpha,
         device=device
     )
-
-    memory = buffers.ReplayBuffer(
-        memory_size, ob_dim, ac_dim,
-        device=device
-    )
-
-    # collect initial data
-
-    ob, _ = env.reset()
-    for _ in range(start_step):
-        with torch.no_grad():
-            ob_t = torch.as_tensor(ob, dtype=torch.float32, device=device)
-            ac_t, _ = agent.p.get_action(ob_t)
-            ac = ac_t.cpu().numpy()
-        next_ob, rwd, terminated, truncated, _ = env.step(ac)
-        done = terminated | truncated
-        memory.push(ob, ac, rwd, next_ob, done)
-        ob = next_ob
 
     # train agent
 
     update_count = 0
 
-    ob, _ = env.reset()
     for _ in count():
 
-        for _ in range(step_per_update):
+        obs = []
+        rwds = []
+        ob, _ = env.reset()
+
+        for _ in count():
+
             with torch.no_grad():
-                ob_t = torch.as_tensor(ob, dtype=torch.float32, device=device)
+                ob_t = torch.as_tensor(ob, dtype=torch.float32, device=device).unsqueeze(0)
                 ac_t, _ = agent.p.get_action(ob_t)
-                ac = ac_t.cpu().numpy()
-            next_ob, rwd, terminated, truncated, _ = env.step(ac)
-            done = terminated | truncated
-            memory.push(ob, ac, rwd, next_ob, done)
-            ob = next_ob
+                ac = ac_t.cpu().numpy().ravel()
+            obs.append(ob)
+            ob, rwd, terminated, truncated, _ = env.step(ac)
+            done = terminated or truncated
+            rwds.append(rwd)
+
+            if done: break
         
-        batch = memory.sample(batch_size)
-        q_loss = agent.update_q(batch['ob'], batch['ac'], batch['rwd'], batch['next_ob'], batch['done'])
-        p_loss = agent.update_p(batch['ob'])
-        agent.update_q_target()
+        obs_t = torch.as_tensor(np.array(obs), dtype=torch.float32, device=device)
+        rtgs = agent.rtgs(np.array(rwds))
+        p_loss = agent.update_p(obs_t)
+        v_loss = agent.update_v(obs_t, rtgs)
         update_count += 1
 
-        writer.add_scalar('loss/q', q_loss, update_count)
         writer.add_scalar('loss/p', p_loss, update_count)
+        writer.add_scalar('loss/v', v_loss, update_count)
 
         if update_count % test_count == 0:
 
@@ -112,7 +90,7 @@ def train(args):
 
             dirname = f'trained_agents/{timestamp}/'
             os.makedirs(dirname, exist_ok=True)
-            torch.save(agent, os.path.join(dirname, f'SACAgent_{update_count}.pt'))
+            torch.save(agent, os.path.join(dirname, f'VPGAgent_{update_count}.pt'))
 
         if update_count == num_updates: break
 
@@ -133,9 +111,8 @@ def test(env_name, agent, num_test_episodes=1):
                 ac_t, _ = agent.p.get_action(ob_t, eval=True)
                 ac = ac_t.cpu().numpy().ravel()
 
-            next_ob, rwd, terminated, truncated, _ = env.step(ac)
+            ob, rwd, terminated, truncated, _ = env.step(ac)
             done = terminated or truncated
-            ob = next_ob
             ret += rwd
 
             if done:
@@ -152,18 +129,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # environment
-    parser.add_argument('--env_name', type=str, default='BipedalWalker-v3')
-    parser.add_argument('--num_envs', type=int, default=8)
-    parser.add_argument('--step_per_update', type=int, default=1)
+    parser.add_argument('--env_name', type=str, default='Pendulum-v1')
 
     # agent
-    parser.add_argument('--num_layers', type=int, default=2)
-    parser.add_argument('--layer_size', type=int, default=256)
-
-    # buffer
-    parser.add_argument('--memory_size', type=int, default=1000000)
-    parser.add_argument('--batch_size', type=int, default=256)
-    parser.add_argument('--start_step', type=int, default=1000)
+    parser.add_argument('--num_layers', type=int, default=1)
+    parser.add_argument('--layer_size', type=int, default=64)
 
     # training
     parser.add_argument('--num_updates', type=int, default=100000)
@@ -171,10 +141,8 @@ if __name__ == '__main__':
     parser.add_argument('--test_count', type=int, default=10)
     parser.add_argument('--num_test_episodes', type=int, default=1)
 
-    parser.add_argument('--lr', type=float, default=0.0003)
-    parser.add_argument('--tau', type=float, default=0.005)
+    parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--gamma', type=float, default=0.99)
-    parser.add_argument('--alpha', type=float, default=0.2)
 
     args = parser.parse_args()
 

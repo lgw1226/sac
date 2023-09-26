@@ -1,3 +1,5 @@
+from math import log
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -11,7 +13,8 @@ LOG_STD_MIN = -10
 LOG_STD_MAX = 2
 
 
-class GaussianPolicy():
+# squashed gaussian policy (numerically more stable than standard gaussian policy)
+class SquashedGaussianPolicy():
 
     def __init__(
         self, ob_dim, ac_dim, ac_lim,
@@ -32,8 +35,8 @@ class GaussianPolicy():
         
         self.net = MLP(self.ob_dim, self.ac_dim * 2, self.num_layers, self.layer_size).to(self.device)
         self.optim = optim.Adam(self.net.parameters(), lr=self.lr)
-    
-    def get_action(self, ob, eval=False):
+
+    def get_dist(self, ob):
 
         output = self.net(ob)
 
@@ -42,14 +45,22 @@ class GaussianPolicy():
 
         dist = distributions.Normal(mean, torch.exp(log_std))
 
+        return dist
+    
+    def get_action(self, ob, eval=False):
+
         if not eval:
+            dist = self.get_dist(ob)
             action = dist.rsample()
         else:
+            dist = self.get_dist(ob)
             action = dist.loc
 
+        tanh_action = torch.tanh(action) * self.ac_lim
         logp = dist.log_prob(action)
+        logp -= 2 * (log(2) - action - F.softplus(-2 * action))
         
-        return action, logp
+        return tanh_action, logp.sum(-1, keepdim=True)
     
 
 if __name__ == '__main__':
@@ -58,8 +69,10 @@ if __name__ == '__main__':
 
     ob_dim = 3
     ac_dim = 1
-    policy = GaussianPolicy(ob_dim, ac_dim, 1, device=device)
+    policy = SquashedGaussianPolicy(ob_dim, ac_dim, 1, device=device)
 
     batch_size = 4
     ob = torch.randn((batch_size, ob_dim), device=device); print(ob)
-    ac, logp = policy.get_action(ob); print(ac); print(logp)
+    dist = policy.get_dist(ob); print(dist.loc, dist.scale, sep='\n')
+    ac = policy.get_action(ob); print(ac)
+    logp = policy.get_logp(ob); print(logp)
