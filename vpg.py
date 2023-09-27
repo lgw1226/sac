@@ -7,14 +7,13 @@ from torch.utils.tensorboard import SummaryWriter
 
 import numpy as np
 import gymnasium as gym
-import matplotlib.pyplot as plt
 
 import agents
-import buffers
 
 
 def train(args):
 
+    gpu_index = args.gpu_index
     env_name = args.env_name
 
     num_updates = args.num_updates
@@ -38,7 +37,7 @@ def train(args):
     ac_dim = env.action_space.shape[-1]
     ac_lim = float(np.min(env.action_space.high))
 
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    device = torch.device('cuda', index=gpu_index) if torch.cuda.is_available() else torch.device('cpu')
     
     agent = agents.VPGAgent(
         ob_dim, ac_dim, ac_lim,
@@ -127,6 +126,9 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser()
+
+    # cuda
+    parser.add_argument('--gpu_index', type=int, default=0)
 
     # environment
     parser.add_argument('--env_name', type=str, default='Pendulum-v1')
