@@ -46,7 +46,7 @@ def train(args):
     env = gym.vector.make(env_name, num_envs=num_envs)
     ob_dim = env.single_observation_space.shape[-1]
     ac_dim = env.single_action_space.shape[-1]
-    ac_lim = env.single_action_space.high
+    ac_lim = float(env.single_action_space.high[-1])
 
     device = torch.device('cuda', index=gpu_index) if torch.cuda.is_available() else torch.device('cpu')
     
@@ -158,8 +158,8 @@ if __name__ == '__main__':
 
     # environment
     parser.add_argument('--env_name', type=str, default='BipedalWalker-v3')
-    parser.add_argument('--num_envs', type=int, default=8)
-    parser.add_argument('--step_per_update', type=int, default=1)
+    parser.add_argument('--num_envs', type=int, default=1)
+    parser.add_argument('--step_per_update', type=int, default=50)
 
     # agent
     parser.add_argument('--num_layers', type=int, default=2)
@@ -168,7 +168,7 @@ if __name__ == '__main__':
     # buffer
     parser.add_argument('--memory_size', type=int, default=1000000)
     parser.add_argument('--batch_size', type=int, default=256)
-    parser.add_argument('--start_step', type=int, default=1000)
+    parser.add_argument('--start_step', type=int, default=10000)
 
     # training
     parser.add_argument('--num_updates', type=int, default=100000)
