@@ -9,9 +9,9 @@ from agents import SACAgent
 
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
-num_episodes = 1
+num_episodes = 10
 dirname = 'trained_agents/230926_131745'
-fname = 'SACAgent_80000'
+fname = 'SACAgent_500000'
 agent = torch.load(os.path.join(dirname, f'{fname}.pt'), map_location=device)
 
 envname = 'BipedalWalker-v3'
@@ -24,7 +24,7 @@ for _ in range(num_episodes):
     ret = 0
     ob, _ = env.reset()
 
-    for _ in count():
+    for _ in range(200):
 
         with torch.no_grad():
 

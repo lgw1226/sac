@@ -41,10 +41,10 @@ def train(args):
     timestamp = time.strftime('%y%m%d_%H%M%S')
     writer = SummaryWriter(f'runs/{timestamp}/')
 
-    env = gym.make_vec(env_name, num_envs=num_envs)
-    ob_dim = env.observation_space.shape[-1]
-    ac_dim = env.action_space.shape[-1]
-    ac_lim = float(np.min(env.action_space.high))
+    env = gym.vector.make(env_name, num_envs=num_envs)
+    ob_dim = env.single_observation_space.shape[-1]
+    ac_dim = env.single_action_space.shape[-1]
+    ac_lim = env.single_action_space.high
 
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     
