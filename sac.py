@@ -15,6 +15,8 @@ import buffers
 
 def train(args):
 
+    gpu_index = args.gpu_index
+
     env_name = args.env_name
     num_envs = args.num_envs
     step_per_update = args.step_per_update
@@ -46,7 +48,7 @@ def train(args):
     ac_dim = env.single_action_space.shape[-1]
     ac_lim = env.single_action_space.high
 
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    device = torch.device('cuda', index=gpu_index) if torch.cuda.is_available() else torch.device('cpu')
     
     agent = agents.SACAgent(
         ob_dim, ac_dim, ac_lim,
@@ -150,6 +152,9 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser()
+
+    # cuda
+    parser.add_argument('--gpu_index', type=int, default=0)
 
     # environment
     parser.add_argument('--env_name', type=str, default='BipedalWalker-v3')
