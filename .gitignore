@@ -1,12 +1,2 @@
-# pycache
-/__pycache__
-*.pyc
-
-# for development
-/*.egg-info
-
-# tensorboard run files
-/runs
-
-# trained agents
-/trained_agents
+# wandb
+/wandb
