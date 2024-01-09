@@ -1,12 +1,15 @@
+import os
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import torch.distributions as D
 import gymnasium as gym
-
+import time
 import wandb
 
+from PIL import Image
 from copy import copy
 from icecream import ic
 
@@ -80,24 +83,39 @@ class MLP(nn.Module):
 
 class Agent():
 
-    def __init__(self, obs_dim, act_dim, lr=0.001, tau=0.005, gamma=0.99, target_update=1, **kwargs):
-        
+    def __init__(
+            self,
+            obs_dim,
+            act_dim,
+            **kwargs
+        ):
+
+        lr = kwargs.get('lr', 0.001)
+        tau = kwargs.get('tau', 0.005)
+        gamma = kwargs.get('gamma', 0.99)
+        target_update = kwargs.get('target_update', 1)
+        hidden_size = kwargs.get('hidden_size', 256)
+        device = kwargs.get('device', torch.device('cpu'))
+
+        self.obs_dim = obs_dim
+        self.act_dim = act_dim
+        self.lr = lr
         self.tau = tau
         self.gamma = gamma
         self.target_update = target_update
         self.target_update_count = 0
 
-        self.device = kwargs.get('device')
         self.entropy_target = -act_dim
+        self.device = device
 
-        self.p = MLP(obs_dim, act_dim * 2).to(device)
+        self.p = MLP(obs_dim, act_dim * 2, hidden_size).to(device)
         self.p_optim = optim.Adam(self.p.parameters(), lr=lr)
 
-        self.q1 = MLP(obs_dim + act_dim, 1).to(device)
+        self.q1 = MLP(obs_dim + act_dim, 1, hidden_size).to(device)
         self.q1_optim = optim.Adam(self.q1.parameters(), lr=lr)
         self.q1t = copy(self.q1).to(device)
 
-        self.q2 = MLP(obs_dim + act_dim, 1).to(device)
+        self.q2 = MLP(obs_dim + act_dim, 1, hidden_size).to(device)
         self.q2_optim = optim.Adam(self.q2.parameters(), lr=lr)
         self.q2t = copy(self.q2).to(device)
 
@@ -107,13 +125,14 @@ class Agent():
     def get_action(self, o, a=None):
 
         mean_logstd = self.p(o)
-        mean = F.tanh(mean_logstd[:,:act_dim])
-        logstd = torch.clip(mean_logstd[:,act_dim:], -5, 0)
+        mean = F.tanh(mean_logstd[:,:self.act_dim])
+        logstd = torch.clip(mean_logstd[:,self.act_dim:], -5, 0)
         dist = torch.distributions.Normal(mean, torch.exp(logstd))
 
         if not a:
             a = dist.rsample()
-        logp = dist.log_prob(a) - torch.log(1 - F.tanh(a).square()).sum(-1, keepdim=True)
+
+        logp = dist.log_prob(a).sum(-1, keepdims=True) - torch.log(1 - F.tanh(a).square()).sum(-1, keepdim=True)
 
         return a, logp
     
@@ -174,29 +193,96 @@ class Agent():
 
         return ((q1_loss + q2_loss) / 2).item(), p_loss.item(), alpha_loss.item(), alpha.item()
 
+    def save(self, filename):
+
+        sd = {
+            'p_sd': self.p.state_dict(),
+            'p_optim_sd': self.p_optim.state_dict(),
+            'q1_sd': self.q1.state_dict(),
+            'q1t_sd': self.q1t.state_dict(),
+            'q1_optim_sd': self.q1_optim.state_dict(),
+            'q2_sd': self.q2.state_dict(),
+            'q2t_sd': self.q2t.state_dict(),
+            'q2_optim_sd': self.q2_optim.state_dict(),
+            'alpha': self.alpha,
+            'alpha_optim_sd': self.alpha_optim.state_dict(),
+        }
+
+        torch.save(sd, filename)
+
+
+def gif(env_name, agent, fps=30):
+
+    render_mode = 'rgb_array'
+    env = gym.make(env_name, render_mode=render_mode)
+
+    frames = []
+    o, _ = env.reset()
+    frame = env.render()
+    frames.append(frame)
+    episode_return = 0
+
+    while True:
+        with torch.no_grad():
+            a, _ = agent.get_action(torch.as_tensor(o, device=agent.device).unsqueeze(0))
+            o, r, terminated, truncated, _ = env.step(a.ravel().cpu().numpy())
+        d = terminated or truncated
+        frame = env.render()
+        frames.append(frame)
+        episode_return += r
+
+        if d: break
+
+    frames = [Image.fromarray(frame) for frame in frames]
+    frames[0].save('./tmp.gif', save_all=True, append_images=frames[1:], duration=1000/fps, loop=False)
+
+    return episode_return
+
 
 def main(args):
 
-    wandb.init()
+    wandb_mode = args.wandb_mode
+    exp_name = args.exp_name
+    record_steps = args.record_steps
+    save_steps = args.save_steps
 
-    device = torch.device('cuda')
+    env_name = args.env_name
+    buffer_size = args.buffer_size
+    batch_size = args.batch_size
+    hidden_size = args.hidden_size
 
-    env_name = 'Pendulum-v1'
+    lr = args.lr
+    tau = args.tau
+    gamma = args.gamma
+    steps_per_rollout = args.steps_per_rollout
+    max_steps = args.max_steps
+
+    wandb.init(name=exp_name, mode=wandb_mode)
+    wandb.config.update(args)
+    timestamp = time.strftime('%y%m%d_%H%M%S')
+
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+
     env = gym.make(env_name)
-
     obs_dim = env.observation_space.shape[0]
     act_dim = env.action_space.shape[0]
-    buffer = Buffer(obs_dim, act_dim, 1000000, device=device)
-    agent = Agent(obs_dim, act_dim, lr=0.0003, device=device)
+    buffer = Buffer(obs_dim, act_dim, buffer_size, device=device)
+    agent = Agent(
+        obs_dim,
+        act_dim,
+        lr=lr,
+        tau=tau,
+        gamma=gamma,
+        device=device,
+        hidden_size=hidden_size
+    )
 
-    gradient_steps = 1
-    total_gradient_steps = 0
-    while total_gradient_steps <= 1000000:
+    total_steps = 0
+    while total_steps <= max_steps:
 
         o, _ = env.reset()
         episode_return = 0
         while True:
-
             with torch.no_grad():
                 a, _ = agent.get_action(torch.as_tensor(o, device=device).unsqueeze(0))
             o2, r, terminated, truncated, _ = env.step(a.ravel().cpu().numpy())
@@ -213,21 +299,34 @@ def main(args):
             o = o2
             episode_return += r
             if d:
-                wandb.log({'EpisodeReturn': episode_return}, step=total_gradient_steps)
-
+                wandb.log({'EpisodeReturn': episode_return}, step=total_steps)
                 o, _ = env.reset()
-                episode_return = 0
                 break
 
-        for _ in range(gradient_steps):
-            q_loss, p_loss, alpha_loss, alpha = agent.update(*buffer.sample(256))
+        for _ in range(steps_per_rollout):
+
+            q_loss, p_loss, alpha_loss, alpha = agent.update(*buffer.sample(batch_size))
+            
+            if total_steps % record_steps == 0:
+                episode_return = gif(env_name, agent)
+                wandb.log({
+                    'Episode': wandb.Video('./tmp.gif', caption=f'Return: {episode_return}', format='gif')
+                }, step=total_steps)
+                
+            if total_steps % save_steps == 0:
+                dirname = f'./trained_models/{timestamp}/'
+                os.makedirs(dirname, exist_ok=True)
+                filename = timestamp + f'_{total_steps}.pt'
+                agent.save(os.path.join(dirname, filename))
+
             wandb.log({
                 'Loss/Q': q_loss,
                 'Loss/P': p_loss,
                 'Loss/Alpha': alpha_loss,
                 'Alpha': alpha,
-            }, step=total_gradient_steps)
-            total_gradient_steps += 1
+            }, step=total_steps)
+
+            total_steps += 1
 
 
 if __name__ == '__main__':
@@ -236,7 +335,21 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('env-name', type=str)
+    parser.add_argument('--wandb-mode', type=str, default='online')
+    parser.add_argument('--exp-name', type=str, default=None)
+    parser.add_argument('--record-steps', type=int, default=1000)
+    parser.add_argument('--save-steps', type=int, default=10000)
+
+    parser.add_argument('--env-name', type=str, default='Pendulum-v1')
+    parser.add_argument('--buffer-size', type=int, default=1000000)
+    parser.add_argument('--batch-size', type=int, default=256)
+    parser.add_argument('--hidden-size', type=int, default=256)
+
+    parser.add_argument('--lr', type=float, default=0.0003)
+    parser.add_argument('--tau', type=float, default=0.005)
+    parser.add_argument('--gamma', type=float, default=0.99)
+    parser.add_argument('--steps-per-rollout', type=int, default=1)
+    parser.add_argument('--max-steps', type=int, default=1000000)
 
     args = parser.parse_args()
 

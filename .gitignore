@@ -1,2 +1,8 @@
 # wandb
 /wandb
+
+# temporary .gif file
+/tmp.gif
+
+# trained models
+trained_models/
